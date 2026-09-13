@@ -470,7 +470,14 @@ func (c *Client) FetchModels(a *auth.Auth) ([]ModelInfo, error) {
 	}
 	c.CommonHeaders(req, a) // 复用共享请求头（Origin/Referer/UA/Accept/Content-Type）
 	req.Header.Set("Authorization", "Bearer "+a.AccessToken)
-	resp, err := c.HTTP.Do(req)
+
+	// 不跟随重定向（防止 302 重定向到 Keycloak 登录 HTML 页面）
+	fetchHTTP := *c.HTTP
+	fetchHTTP.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	resp, err := fetchHTTP.Do(req)
 	if err != nil {
 		return nil, err
 	}

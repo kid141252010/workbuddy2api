@@ -1551,4 +1551,112 @@ func TestRegionModelRouting(t *testing.T) {
 	}
 }
 
+func TestCustomModelsOverride(t *testing.T) {
+	p := pool.New("")
+	p.Add(&auth.Auth{UID: "u1", AccessToken: "tok", Domain: "www.workbuddy.ai", ExpiresAt: 9999999999})
+	up := upstream.New()
+
+	custom := []ModelItem{
+		{ID: "my-custom-model", ContextLength: 32768},
+		{ID: "claude-custom"},
+	}
+
+	h := NewHandler(Config{
+		Pool:         p,
+		Upstream:     up,
+		CustomModels: custom,
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	h.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(resp.Data))
+	}
+	if resp.Data[0]["id"] != "my-custom-model" || resp.Data[0]["context_length"] != float64(32768) {
+		t.Errorf("model 0 mismatch: %+v", resp.Data[0])
+	}
+	if resp.Data[1]["id"] != "claude-custom" || resp.Data[1]["context_length"] != float64(200000) {
+		t.Errorf("model 1 mismatch: %+v", resp.Data[1])
+	}
+}
+
+func TestModelMappingRewrite(t *testing.T) {
+	p := pool.New("")
+	p.Add(&auth.Auth{UID: "u1", AccessToken: "tok", Domain: "www.workbuddy.ai", ExpiresAt: 9999999999})
+
+	var receivedModel string
+	up := &upstream.Client{
+		HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			var body struct {
+				Model string `json:"model"`
+			}
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &body)
+			receivedModel = body.Model
+			resp := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"
+			return &http.Response{
+				StatusCode: 200,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(resp)),
+			}, nil
+		})},
+		ChatBaseCN:     "https://fake.example",
+		ChatBaseGlobal: "https://fake.example",
+	}
+
+	h := NewHandler(Config{
+		Pool:     p,
+		Upstream: up,
+		ModelMapping: map[string]string{
+			"claude-3-5-sonnet-20241022": "deepseek-v4-pro",
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"claude-3-5-sonnet-20241022","messages":[{"role":"user","content":"hi"}]}`))
+	h.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if receivedModel != "deepseek-v4-pro" {
+		t.Errorf("model mapping failed: expected deepseek-v4-pro, got %q", receivedModel)
+	}
+}
+
+func TestStaticModelsComplete(t *testing.T) {
+	ids := map[string]bool{}
+	for _, m := range staticModels {
+		ids[m["id"].(string)] = true
+	}
+	required := []string{
+		"claude-3-7-sonnet",
+		"gpt-4o",
+		"deepseek-v4-pro",
+		"kimi-k3-1",
+		"kimi-k2.7",
+		"glm-5.2",
+		"minimax-m3",
+		"hy3",
+		"kuaisu",
+	}
+	for _, req := range required {
+		if !ids[req] {
+			t.Errorf("missing model %s in staticModels", req)
+		}
+	}
+}
+
+
 

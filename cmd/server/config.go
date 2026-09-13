@@ -11,6 +11,7 @@ import (
 
 	"workbuddy2api/internal/config"
 	"workbuddy2api/internal/prompt"
+	"workbuddy2api/internal/server"
 )
 
 // Config 顶层配置。
@@ -19,6 +20,11 @@ type Config struct {
 	APIKey    string `json:"api_key"`    // 空 = 不鉴权
 	AuthDir   string `json:"auth_dir"`   // ./auths
 	StateFile string `json:"state_file"` // ./data/state.json
+
+	// Models 自定义模型列表（可选；覆盖默认静态列表，空则使用内置静态/动态列表）。
+	Models []server.ModelItem `json:"models"`
+	// ModelMapping 模型重映射（可选；客户端请求模型名 -> 上游实际模型名）。
+	ModelMapping map[string]string `json:"model_mapping"`
 
 	Server struct {
 		// MaxBodyMB 聊天请求体大小上限（单位 MB，默认 8）。
@@ -135,6 +141,7 @@ func Default() *Config {
 	c.SessionSticky.Enabled = true
 	c.SessionSticky.TTL = "30m"
 	c.SessionSticky.GCInterval = "5m"
+	c.ModelMapping = make(map[string]string)
 	return c
 }
 

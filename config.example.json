@@ -3,6 +3,20 @@
   "api_key": "test_key",
   "auth_dir": "./auths",
   "state_file": "./data/state.json",
+  "models": [
+    "claude-3-7-sonnet",
+    "claude-3-5-sonnet",
+    "gpt-4o",
+    "deepseek-r1",
+    "deepseek-v3",
+    "deepseek-v4-pro",
+    "kimi-k3-1",
+    "kimi-k2.7",
+    "glm-5.2"
+  ],
+  "model_mapping": {
+    "claude-3-5-sonnet-20241022": "claude-3-5-sonnet"
+  },
   "server": {
     "max_body_mb": 8
   },

@@ -43,6 +43,29 @@ type Config struct {
 	PromptMode string
 	// PromptText custom 模式下注入的系统提示词文本（来自 config.PromptText）。
 	PromptText string
+
+	// CustomModels 自定义模型列表（覆盖默认静态列表，空则使用内置静态/动态）。
+	CustomModels []ModelItem
+	// ModelMapping 模型名称重映射（客户端模型名 -> 上游实际请求模型名）。
+	ModelMapping map[string]string
+}
+
+// ModelItem 定义单个模型配置，支持纯字符串（"model-id"）或对象（{"id": "...", ...}）两种反序列化形式。
+type ModelItem struct {
+	ID            string `json:"id"`
+	ContextLength int64  `json:"context_length,omitempty"`
+	MaxTokens     int64  `json:"max_output_tokens,omitempty"`
+}
+
+// UnmarshalJSON 允许从 JSON 字符串或对象解析 ModelItem。
+func (m *ModelItem) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		m.ID = s
+		return nil
+	}
+	type plain ModelItem
+	return json.Unmarshal(data, (*plain)(m))
 }
 
 // notFoundCooldown 上游 404 的固定短冷却时长。
@@ -144,9 +167,9 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 静态模型表（动态接口失败或账号池无可用账号时的回退，涵盖国际与国内版常用模型）。
+// 静态模型表（涵盖国际版、国内版以及官方 WorkBuddy 最新模型）。
 var staticModels = []map[string]any{
-	// 国际版常见模型
+	// 国际版 / 旗舰模型
 	{"id": "claude-3-7-sonnet", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 200000},
 	{"id": "claude-3-5-sonnet", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 200000},
 	{"id": "claude-3-5-haiku", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 200000},
@@ -154,19 +177,30 @@ var staticModels = []map[string]any{
 	{"id": "gpt-4o-mini", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 128000},
 	{"id": "o1", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 200000},
 	{"id": "o3-mini", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 200000},
+	// DeepSeek 系列
 	{"id": "deepseek-r1", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
 	{"id": "deepseek-v3", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
-	// 国内版模型
+	{"id": "deepseek-v4-pro", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	{"id": "deepseek-v4-flash", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	// Kimi 系列（官方最新 K3、K2.7-Code、K2.6）
+	{"id": "kimi-k3-1", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	{"id": "kimi-k2.7", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	{"id": "kimi-k2.6", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	// GLM 系列
 	{"id": "glm-5.2", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
 	{"id": "glm-5.1", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
 	{"id": "glm-5v-turbo", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
-	{"id": "kimi-k2.7", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	// MiniMax 系列
 	{"id": "minimax-m3", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	// 混元系列
 	{"id": "hy3", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
 	{"id": "hy3-preview", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
 	{"id": "hy3-preview-agent", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
-	{"id": "deepseek-v4-pro", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
-	{"id": "deepseek-v4-flash", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	// WorkBuddy 官方模式别名
+	{"id": "kuaisu", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	{"id": "junheng", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	{"id": "zhuli", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	{"id": "shendu", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
 }
 
 // dynamicModelsCache 动态模型缓存。
@@ -182,7 +216,7 @@ const (
 	modelsFetchFailCooldown = 5 * time.Minute
 )
 
-// models 返回模型列表：优先动态（缓存 1h），失败回退静态表。
+// models 返回模型列表：优先 CustomModels，其次动态（缓存 1h），最终回退静态表。
 func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"object": "list",
@@ -190,8 +224,29 @@ func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// modelList 动态获取模型列表并包装成 OpenAI 格式（含 context_length）。
+// modelList 获取模型列表并包装成 OpenAI 格式（含 context_length）。
 func (h *Handler) modelList() []map[string]any {
+	if len(h.cfg.CustomModels) > 0 {
+		out := make([]map[string]any, 0, len(h.cfg.CustomModels))
+		for _, m := range h.cfg.CustomModels {
+			ctxLen := m.ContextLength
+			if ctxLen <= 0 {
+				ctxLen = defaultContextLengthForModel(m.ID)
+			}
+			entry := map[string]any{
+				"id":             m.ID,
+				"object":         "model",
+				"created":        1753600000,
+				"owned_by":       "workbuddy",
+				"context_length": ctxLen,
+			}
+			if m.MaxTokens > 0 {
+				entry["max_output_tokens"] = m.MaxTokens
+			}
+			out = append(out, entry)
+		}
+		return out
+	}
 	if infos := h.fetchDynamicModels(); len(infos) > 0 {
 		out := make([]map[string]any, 0, len(infos))
 		for _, mi := range infos {
@@ -211,6 +266,17 @@ func (h *Handler) modelList() []map[string]any {
 		return out
 	}
 	return staticModels
+}
+
+func defaultContextLengthForModel(id string) int64 {
+	m := strings.ToLower(id)
+	if strings.Contains(m, "claude") || strings.Contains(m, "o1") || strings.Contains(m, "o3") {
+		return 200000
+	}
+	if strings.Contains(m, "gpt-4") {
+		return 128000
+	}
+	return 131072
 }
 
 // fetchDynamicModels 从池中不同 region 健康账号拉模型列表并合并去重，缓存 1h。
@@ -246,6 +312,11 @@ func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 			continue
 		}
 		triedRegions[reg] = true
+
+		// 国际版（workbuddy.ai）无开放的动态模型接口（避免 500 报错与不必要重试）
+		if reg == "global" {
+			continue
+		}
 
 		infos, err := h.cfg.Upstream.FetchModels(a)
 		if err != nil || len(infos) == 0 {
@@ -304,6 +375,14 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		Model  string `json:"model"`
 	}
 	_ = json.Unmarshal(body, &peek)
+
+	// 模型重映射（如配置映射关系，将客户端模型名改写为上游期望的模型名）。
+	if h.cfg.ModelMapping != nil && peek.Model != "" {
+		if mapped, ok := h.cfg.ModelMapping[peek.Model]; ok && mapped != "" && mapped != peek.Model {
+			peek.Model = mapped
+			body = rewriteModel(body, mapped)
+		}
+	}
 
 	// 请求级统计：出口即打一行表格日志（任何路径都会走到）。
 	st := newChatStat(time.Now(), body, peek.Stream)
@@ -625,4 +704,21 @@ func (h *Handler) findAvailableAccountByRegion(tried map[string]bool, model, tar
 	}
 	return nil
 }
+
+func rewriteModel(body []byte, targetModel string) []byte {
+	if len(body) == 0 || targetModel == "" {
+		return body
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return body
+	}
+	obj["model"] = targetModel
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
 

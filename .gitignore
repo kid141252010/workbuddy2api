@@ -1,6 +1,7 @@
 # Auth & secrets
 auths/
 data/
+workbuddy-*.json
 *.key
 *.pem
 *.env

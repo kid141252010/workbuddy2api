@@ -135,11 +135,23 @@ func (p *Pool) pick(tried map[string]bool, reqModel string) *auth.Auth {
 	var e *entry
 	if len(eligible) == 0 {
 		// top5 全部刚被用过：LRU 兜底，维持发散且不 starve 任一候选。
-		e = cands[0]
+		// 并发或低精度时钟下，若存在并列最早的账号，在并列候选间加权随机打散，避免恒定聚集到首项。
+		var oldest []*entry
+		minTime := cands[0].lastUsed
 		for _, c := range cands[1:] {
-			if c.lastUsed.Before(e.lastUsed) {
-				e = c
+			if c.lastUsed.Before(minTime) {
+				minTime = c.lastUsed
 			}
+		}
+		for _, c := range cands {
+			if !c.lastUsed.After(minTime) {
+				oldest = append(oldest, c)
+			}
+		}
+		if len(oldest) == 1 {
+			e = oldest[0]
+		} else {
+			e = p.pickWeighted(oldest)
 		}
 	} else {
 		e = p.pickWeighted(eligible) // eligible 保序 = top5 降序子集
