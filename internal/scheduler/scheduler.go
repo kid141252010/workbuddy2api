@@ -331,7 +331,7 @@ func (s *Scheduler) RunActivityNow() {
 			continue
 		}
 		a := s.cfg.Pool.AuthByUID(st.UID)
-		if a == nil || a.AccessToken == "" {
+		if a == nil || a.AccessToken == "" || a.Region() == "global" {
 			continue
 		}
 		if !first {

@@ -53,6 +53,11 @@ type Config struct {
 		// 桌面 UA 为 `WorkBuddy/<version>`。指纹净化考虑：默认值保持现状（可配而非改死），
 		// 仅当用户显式配置才改写。
 		UserAgent string `json:"user_agent"`
+		// 可选覆盖上游域名（默认 CN 走 copilot.tencent.com/codebuddy.cn，Global 走 workbuddy.ai）
+		ChatBaseCN        string `json:"chat_base_cn"`
+		BillingBaseCN     string `json:"billing_base_cn"`
+		ChatBaseGlobal    string `json:"chat_base_global"`
+		BillingBaseGlobal string `json:"billing_base_global"`
 	} `json:"upstream"`
 
 	Features struct {

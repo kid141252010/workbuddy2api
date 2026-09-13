@@ -1496,3 +1496,49 @@ func TestCustomModeFingerprintSanitizePreserved(t *testing.T) {
 		t.Errorf("want exactly 1 system message, got %d (all=%v)", systemCount, msgs)
 	}
 }
+
+func TestChatGlobalAccountRoutesToWorkBuddyAI(t *testing.T) {
+	p := pool.New("")
+	p.Add(&auth.Auth{
+		UID:         "global-user",
+		AccessToken: "test-token-global",
+		Domain:      "www.workbuddy.ai",
+		ExpiresAt:   9999999999,
+	})
+
+	var reqURL, origin, referer string
+	up := &upstream.Client{
+		HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			reqURL = r.URL.String()
+			origin = r.Header.Get("Origin")
+			referer = r.Header.Get("Referer")
+			body := "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\ndata: [DONE]\n\n"
+			return &http.Response{
+				StatusCode: 200,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}, nil
+		})},
+		ChatBaseCN:     "https://copilot.tencent.com",
+		ChatBaseGlobal: "https://www.workbuddy.ai",
+	}
+
+	h := NewHandler(Config{Pool: p, Upstream: up})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`))
+	h.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.HasPrefix(reqURL, "https://www.workbuddy.ai/v2/chat/completions") {
+		t.Errorf("url=%q want prefix https://www.workbuddy.ai/v2/chat/completions", reqURL)
+	}
+	if origin != "https://www.workbuddy.ai" {
+		t.Errorf("origin=%q want https://www.workbuddy.ai", origin)
+	}
+	if referer != "https://www.workbuddy.ai/" {
+		t.Errorf("referer=%q want https://www.workbuddy.ai/", referer)
+	}
+}
+

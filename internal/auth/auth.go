@@ -33,6 +33,21 @@ func (a *Auth) Lock() { a.mu.Lock() }
 // Unlock 释放 a.Lock 获取的锁。
 func (a *Auth) Unlock() { a.mu.Unlock() }
 
+// globalSuffix 判定全球区（global）账号的域名后缀；子域（如 www./api.）也属于全球区。
+const globalSuffix = ".workbuddy.ai"
+
+// Region 返回 "cn" 或 "global"。domain 为空或含 codebuddy 视为 CN。
+func (a *Auth) Region() string {
+	if a == nil {
+		return "cn"
+	}
+	d := strings.ToLower(strings.TrimSpace(a.Domain))
+	if d == "workbuddy.ai" || strings.HasSuffix(d, globalSuffix) || strings.Contains(d, "workbuddy.ai") {
+		return "global"
+	}
+	return "cn"
+}
+
 // NeedsRefresh 报告 token 是否将在 within 内过期（或已过期/无 expiry）。
 func (a *Auth) NeedsRefresh(within time.Duration) bool {
 	if a.ExpiresAt <= 0 {

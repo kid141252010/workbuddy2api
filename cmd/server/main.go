@@ -97,6 +97,18 @@ func main() {
 	up.SanitizeFingerprints = cfg.Features.SanitizeBlacklistFingerprints
 	// 出站 UA 覆盖（issue #42）：非空才改写，空 = 现状 clientUA（指纹净化考虑）。
 	up.UserAgent = cfg.Upstream.UserAgent
+	if cfg.Upstream.ChatBaseCN != "" {
+		up.ChatBaseCN = cfg.Upstream.ChatBaseCN
+	}
+	if cfg.Upstream.BillingBaseCN != "" {
+		up.BillingBaseCN = cfg.Upstream.BillingBaseCN
+	}
+	if cfg.Upstream.ChatBaseGlobal != "" {
+		up.ChatBaseGlobal = cfg.Upstream.ChatBaseGlobal
+	}
+	if cfg.Upstream.BillingBaseGlobal != "" {
+		up.BillingBaseGlob = cfg.Upstream.BillingBaseGlobal
+	}
 
 	sch := scheduler.New(scheduler.Config{
 		Pool:                p,

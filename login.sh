@@ -15,6 +15,19 @@ cd "$(dirname "$0")"
 AUTH_DIR="./auths"
 CONTAINER="workbuddy2api"
 
+REGION="cn"
+LOGIN_EXTRA_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --global|-g|global)
+            REGION="global"
+            LOGIN_EXTRA_ARGS+=("--global")
+            ;;
+        *)
+            ;;
+    esac
+done
+
 mkdir -p "$AUTH_DIR"
 
 # login 工具：不存在才编译（源码改动后手动 go build -o login ./cmd/login）
@@ -24,11 +37,15 @@ if [[ ! -x "$LOGIN_BIN" ]]; then
 fi
 
 echo "============================================================"
-echo "  WorkBuddy OAuth 登录"
+if [[ "$REGION" == "global" ]]; then
+    echo "  WorkBuddy Global 国际版 OAuth 登录"
+else
+    echo "  WorkBuddy CN 国内版 OAuth 登录 (国际版可用 ./login.sh --global)"
+fi
 echo "============================================================"
 echo ""
 
-AUTH_URL=$("$LOGIN_BIN" url)
+AUTH_URL=$("$LOGIN_BIN" url "${LOGIN_EXTRA_ARGS[@]+"${LOGIN_EXTRA_ARGS[@]}"}")
 
 echo "请在浏览器中打开以下链接完成登录："
 echo ""
@@ -72,14 +89,19 @@ if [[ -z "$USER_ID" ]]; then
     exit 1
 fi
 
+if [[ -z "$DOMAIN" && "$REGION" == "global" ]]; then
+    DOMAIN="www.workbuddy.ai"
+fi
+
 EXPIRES_AT=$(( $(date +%s) + EXPIRES_IN ))
 
-# ─── 签到（CN：POST codebuddy.cn/v2/billing/meter/daily-checkin，幂等不阻塞）───
+# ─── 签到（CN: codebuddy.cn / Global: workbuddy.ai，POST /v2/billing/meter/daily-checkin）───
 python3 - <<PYEOF
 import json, urllib.request, urllib.error
 
+checkin_url = "https://www.workbuddy.ai/v2/billing/meter/daily-checkin" if "$REGION" == "global" else "https://www.codebuddy.cn/v2/billing/meter/daily-checkin"
 req = urllib.request.Request(
-    "https://www.codebuddy.cn/v2/billing/meter/daily-checkin",
+    checkin_url,
     method="POST", data=b"{}",
     headers={
         "Authorization": "Bearer $TOKEN",

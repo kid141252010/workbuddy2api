@@ -138,9 +138,11 @@ func jsonResp(status int, body string) *http.Response {
 
 func testClient(fn rtFunc) *Client {
 	return &Client{
-		HTTP:          &http.Client{Transport: fn},
-		ChatBaseCN:    "https://chat.example",
-		BillingBaseCN: "https://billing.example",
+		HTTP:            &http.Client{Transport: fn},
+		ChatBaseCN:      "https://chat.example",
+		BillingBaseCN:   "https://billing.example",
+		ChatBaseGlobal:  "https://gchat.example",
+		BillingBaseGlob: "https://gbilling.example",
 	}
 }
 
@@ -434,16 +436,26 @@ func TestIsAlreadyCheckinRejectsNonUpstream(t *testing.T) {
 	}
 }
 
-func TestBasesAlwaysCN(t *testing.T) {
+func TestRegionBases(t *testing.T) {
 	c := testClient(nil)
 	cn := &auth.Auth{Domain: ""}
-	other := &auth.Auth{Domain: "example.com"}
+	gl := &auth.Auth{Domain: "www.workbuddy.ai"}
 	if c.chatBase(cn) != "https://chat.example" || c.billingBase(cn) != "https://billing.example" {
 		t.Error("cn bases wrong")
 	}
-	// 恒 CN：domain 不同不改变上游 host。
-	if c.chatBase(other) != c.chatBase(cn) || c.billingBase(other) != c.billingBase(cn) {
-		t.Error("bases must be CN regardless of domain")
+	if c.chatBase(gl) != "https://gchat.example" || c.billingBase(gl) != "https://gbilling.example" {
+		t.Error("global bases wrong")
+	}
+}
+
+func TestOriginRefererFor(t *testing.T) {
+	cn := &auth.Auth{Domain: ""}
+	gl := &auth.Auth{Domain: "www.workbuddy.ai"}
+	if originRefererFor(cn) != originRefererCN {
+		t.Errorf("cn referer got %q, want %q", originRefererFor(cn), originRefererCN)
+	}
+	if originRefererFor(gl) != originRefererGlobal {
+		t.Errorf("global referer got %q, want %q", originRefererFor(gl), originRefererGlobal)
 	}
 }
 

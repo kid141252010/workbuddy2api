@@ -1,12 +1,12 @@
-// login.go — WorkBuddy CN OAuth 登录（设备授权流程，CN realm only）。
+// login.go — WorkBuddy OAuth 登录（设备授权流程，支持 CN 及 Global 国际版）。
 //
 // 两个子命令，由 login.sh 顺序驱动：
 //
-//	login url   → POST /v2/plugin/auth/state?platform=CLI 拿 state+authUrl，
-//	              state 落 /tmp/wb2api-login-state.json，stdout 打印授权 URL
-//	login poll  → 读 state，GET /v2/plugin/auth/token?state= 一次，
-//	              成功再 GET /v2/plugin/login/account?state= 拿 uid/nickname，
-//	              stdout 打印完整 token+account JSON
+//	login url [--global|-g]   → POST /v2/plugin/auth/state?platform=CLI 拿 state+authUrl，
+//	                            state 落临时文件，stdout 打印授权 URL
+//	login poll                → 读 state，GET /v2/plugin/auth/token?state= 一次，
+//	                            成功再 GET /v2/plugin/login/account?state= 拿 uid/nickname，
+//	                            stdout 打印完整 token+account JSON
 //
 // 无 PKCE（workbuddy 设备流由服务端签发 state）。
 package main
@@ -19,39 +19,44 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
-// 上游常量（CN only）
+// 上游常量（CN 与 Global）
 const (
-	upstreamBaseCN    = "https://copilot.tencent.com"
-	clientUA          = "CLI/2.63.2 CodeBuddy/2.63.2"
-	originReferer     = "https://www.codebuddy.cn"
-	endpointAuthState = upstreamBaseCN + "/v2/plugin/auth/state?platform=CLI"
-	endpointLoginAcct = upstreamBaseCN + "/v2/plugin/login/account?state="
-	endpointAuthToken = upstreamBaseCN + "/v2/plugin/auth/token?state="
-	stateFile         = "/tmp/wb2api-login-state.json"
+	upstreamBaseCN      = "https://copilot.tencent.com"
+	originRefererCN     = "https://www.codebuddy.cn"
+	upstreamBaseGlobal  = "https://www.workbuddy.ai"
+	originRefererGlobal = "https://www.workbuddy.ai"
+	clientUA            = "CLI/2.63.2 CodeBuddy/2.63.2"
 )
 
+var stateFile = filepath.Join(os.TempDir(), "wb2api-login-state.json")
+
 // commonHeaders 通用请求头
-func commonHeaders(req *http.Request) {
+func commonHeaders(req *http.Request, origin string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("Origin", originReferer)
-	req.Header.Set("Referer", originReferer+"/")
+	if origin == "" {
+		origin = originRefererCN
+	}
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Referer", origin+"/")
 	req.Header.Set("User-Agent", clientUA)
 }
 
-// apiEnvelope 与 main.go:429-433 一致
+// apiEnvelope 响应信封
 type apiEnvelope struct {
 	Code int             `json:"code"`
 	Msg  string          `json:"msg"`
 	Data json.RawMessage `json:"data"`
 }
 
-// doJSON 与 oauth.go:33-66 一致：{code,msg,data} 信封，code!=0 → error
-func doJSON(client *http.Client, method, fullURL string, headers func(*http.Request), body io.Reader) (json.RawMessage, int, error) {
+// doJSON 发送 JSON 请求：{code,msg,data} 信封，code!=0 → error
+func doJSON(client *http.Client, method, fullURL string, headers func(*http.Request), body io.Reader, origin string) (json.RawMessage, int, error) {
 	req, err := http.NewRequest(method, fullURL, body)
 	if err != nil {
 		return nil, 0, err
@@ -59,7 +64,7 @@ func doJSON(client *http.Client, method, fullURL string, headers func(*http.Requ
 	if headers != nil {
 		headers(req)
 	} else {
-		commonHeaders(req)
+		commonHeaders(req, origin)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -89,21 +94,52 @@ func fatal(format string, args ...any) {
 }
 
 type loginState struct {
-	State string `json:"state"`
+	State        string `json:"state"`
+	Region       string `json:"region"`
+	UpstreamBase string `json:"upstream_base"`
+	Origin       string `json:"origin"`
+}
+
+func parseRegion(args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-g" || arg == "--global" || arg == "global" {
+			return "global"
+		}
+		if (arg == "--region" || arg == "-r") && i+1 < len(args) {
+			if strings.ToLower(args[i+1]) == "global" {
+				return "global"
+			}
+		}
+		if strings.HasPrefix(arg, "--region=") {
+			if strings.ToLower(strings.TrimPrefix(arg, "--region=")) == "global" {
+				return "global"
+			}
+		}
+	}
+	return "cn"
 }
 
 func main() {
 	if len(os.Args) < 2 {
-		fatal("usage: login <url|poll>")
+		fatal("usage: login <url|poll> [--global|-g]")
 	}
-	// 每个流程独立 cookie jar（oauth.go:22-29：多账号登录互不串会话）
+	// 每个流程独立 cookie jar（多账号登录互不串会话）
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Timeout: 30 * time.Second, Jar: jar}
 
 	switch os.Args[1] {
 	case "url":
-		// handleStartLogin (oauth.go:68-87)
-		data, _, err := doJSON(client, http.MethodPost, endpointAuthState, nil, bytes.NewReader([]byte("{}")))
+		region := parseRegion(os.Args[2:])
+		upstreamBase := upstreamBaseCN
+		origin := originRefererCN
+		if region == "global" {
+			upstreamBase = upstreamBaseGlobal
+			origin = originRefererGlobal
+		}
+		endpointAuthState := upstreamBase + "/v2/plugin/auth/state?platform=CLI"
+
+		data, _, err := doJSON(client, http.MethodPost, endpointAuthState, nil, bytes.NewReader([]byte("{}")), origin)
 		if err != nil {
 			fatal("auth state failed: %v", err)
 		}
@@ -114,7 +150,12 @@ func main() {
 		if err := json.Unmarshal(data, &st); err != nil || st.State == "" || st.AuthURL == "" {
 			fatal("auth state: missing state or authUrl")
 		}
-		raw, _ := json.Marshal(loginState{State: st.State})
+		raw, _ := json.Marshal(loginState{
+			State:        st.State,
+			Region:       region,
+			UpstreamBase: upstreamBase,
+			Origin:       origin,
+		})
 		if err := os.WriteFile(stateFile, raw, 0o600); err != nil {
 			fatal("write state: %v", err)
 		}
@@ -129,9 +170,15 @@ func main() {
 		if err := json.Unmarshal(raw, &ls); err != nil {
 			fatal("parse state: %v", err)
 		}
-		// handlePollLogin (oauth.go:108-162)：auth/token 是权威登录状态端点，
-		// pending 时业务 code 非 0（"login ing"），完成时 code=0 + token bundle
-		tokRaw, status, errTok := doJSON(client, http.MethodGet, endpointAuthToken+ls.State, nil, nil)
+		if ls.UpstreamBase == "" {
+			ls.UpstreamBase = upstreamBaseCN
+			ls.Origin = originRefererCN
+			ls.Region = "cn"
+		}
+		endpointAuthToken := ls.UpstreamBase + "/v2/plugin/auth/token?state="
+		endpointLoginAcct := ls.UpstreamBase + "/v2/plugin/login/account?state="
+
+		tokRaw, status, errTok := doJSON(client, http.MethodGet, endpointAuthToken+ls.State, nil, nil, ls.Origin)
 		if errTok != nil {
 			if status == 0 || status >= 500 {
 				fatal("token endpoint error: %v", errTok)
@@ -147,6 +194,9 @@ func main() {
 		if err := json.Unmarshal(tokRaw, &tok); err != nil || tok.AccessToken == "" {
 			fatal("登录未完成（waiting for login）。请确认已在浏览器完成登录再按 y")
 		}
+		if tok.Domain == "" && ls.Region == "global" {
+			tok.Domain = "www.workbuddy.ai"
+		}
 		// login/account 拿 uid/nickname（带 Bearer）
 		var acct struct {
 			UID          string `json:"uid"`
@@ -154,10 +204,10 @@ func main() {
 			Nickname     string `json:"nickname"`
 		}
 		acctHeaders := func(r *http.Request) {
-			commonHeaders(r)
+			commonHeaders(r, ls.Origin)
 			r.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 		}
-		if acctRaw, _, errAcct := doJSON(client, http.MethodGet, endpointLoginAcct+ls.State, acctHeaders, nil); errAcct == nil {
+		if acctRaw, _, errAcct := doJSON(client, http.MethodGet, endpointLoginAcct+ls.State, acctHeaders, nil, ls.Origin); errAcct == nil {
 			_ = json.Unmarshal(acctRaw, &acct)
 		}
 		out := map[string]any{
@@ -168,6 +218,7 @@ func main() {
 			"uid":           acct.UID,
 			"enterprise_id": acct.EnterpriseID,
 			"nickname":      acct.Nickname,
+			"region":        ls.Region,
 		}
 		oraw, _ := json.Marshal(out)
 		fmt.Println(string(oraw))

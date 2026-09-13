@@ -271,8 +271,10 @@ type Client struct {
 	// （指纹净化考虑），仅当用户显式配置才改写。
 	UserAgent string
 
-	ChatBaseCN    string
-	BillingBaseCN string
+	ChatBaseCN      string
+	BillingBaseCN   string
+	ChatBaseGlobal  string
+	BillingBaseGlob string
 }
 
 // New 生产默认值。配置连接池减少 TLS 握手。
@@ -290,6 +292,8 @@ func New() *Client {
 		SanitizeFingerprints: true,
 		ChatBaseCN:           "https://copilot.tencent.com",
 		BillingBaseCN:        "https://www.codebuddy.cn",
+		ChatBaseGlobal:       "https://www.workbuddy.ai",
+		BillingBaseGlob:      "https://www.workbuddy.ai",
 	}
 }
 
@@ -302,6 +306,12 @@ func (c *Client) chatHTTP() *http.Client {
 }
 
 func (c *Client) chatBase(a *auth.Auth) string {
+	if a != nil && a.Region() == "global" {
+		if c.ChatBaseGlobal != "" {
+			return c.ChatBaseGlobal
+		}
+		return "https://www.workbuddy.ai"
+	}
 	return c.ChatBaseCN
 }
 
@@ -325,6 +335,12 @@ func (c *Client) effortsSnapshot() map[string][]string {
 }
 
 func (c *Client) billingBase(a *auth.Auth) string {
+	if a != nil && a.Region() == "global" {
+		if c.BillingBaseGlob != "" {
+			return c.BillingBaseGlob
+		}
+		return "https://www.workbuddy.ai"
+	}
 	return c.BillingBaseCN
 }
 

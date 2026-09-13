@@ -93,3 +93,25 @@ func TestNeedsRefresh(t *testing.T) {
 		t.Error("far future should not need refresh")
 	}
 }
+
+func TestRegion(t *testing.T) {
+	cases := []struct {
+		domain string
+		want   string
+	}{
+		{"", "cn"},
+		{"codebuddy.cn", "cn"},
+		{"www.codebuddy.cn", "cn"},
+		{"workbuddy.ai", "global"},
+		{"www.workbuddy.ai", "global"},
+		{"api.workbuddy.ai", "global"},
+		{"WORKBUDDY.AI", "global"},
+	}
+	for _, c := range cases {
+		a := &Auth{Domain: c.domain}
+		if got := a.Region(); got != c.want {
+			t.Errorf("domain %q got region %q, want %q", c.domain, got, c.want)
+		}
+	}
+}
+
