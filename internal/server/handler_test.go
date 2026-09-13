@@ -1542,3 +1542,13 @@ func TestChatGlobalAccountRoutesToWorkBuddyAI(t *testing.T) {
 	}
 }
 
+func TestRegionModelRouting(t *testing.T) {
+	if !isGlobalModel("claude-3-7-sonnet") || !isGlobalModel("gpt-4o") || !isGlobalModel("deepseek-r1") {
+		t.Error("isGlobalModel detection failed")
+	}
+	if !isCNModel("glm-5.2") || !isCNModel("hy3") || !isCNModel("kimi-k2.7") {
+		t.Error("isCNModel detection failed")
+	}
+}
+
+

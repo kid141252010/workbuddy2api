@@ -144,8 +144,19 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 静态 CN 模型表（api-reference §5，动态接口失败时的回退）。
+// 静态模型表（动态接口失败或账号池无可用账号时的回退，涵盖国际与国内版常用模型）。
 var staticModels = []map[string]any{
+	// 国际版常见模型
+	{"id": "claude-3-7-sonnet", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 200000},
+	{"id": "claude-3-5-sonnet", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 200000},
+	{"id": "claude-3-5-haiku", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 200000},
+	{"id": "gpt-4o", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 128000},
+	{"id": "gpt-4o-mini", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 128000},
+	{"id": "o1", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 200000},
+	{"id": "o3-mini", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 200000},
+	{"id": "deepseek-r1", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	{"id": "deepseek-v3", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
+	// 国内版模型
 	{"id": "glm-5.2", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
 	{"id": "glm-5.1", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
 	{"id": "glm-5v-turbo", "object": "model", "created": 1753600000, "owned_by": "workbuddy", "context_length": 131072},
@@ -202,7 +213,7 @@ func (h *Handler) modelList() []map[string]any {
 	return staticModels
 }
 
-// fetchDynamicModels 从池中任一健康账号拉模型列表（含 contextWindow/maxTokens），缓存 1h。
+// fetchDynamicModels 从池中不同 region 健康账号拉模型列表并合并去重，缓存 1h。
 // 拉取失败记录时间戳进入 5min 负缓存，冷却期内直接用静态表，避免反复打上游。
 func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 	dynamicModelsCache.RLock()
@@ -218,25 +229,50 @@ func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 	}
 	dynamicModelsCache.RUnlock()
 
-	acct := h.cfg.Pool.Pick()
-	if acct == nil {
-		return nil
+	var allInfos []upstream.ModelInfo
+	seenModel := map[string]bool{}
+	triedRegions := map[string]bool{}
+
+	for _, st := range h.cfg.Pool.List() {
+		if st.Disabled {
+			continue
+		}
+		a := h.cfg.Pool.AuthByUID(st.UID)
+		if a == nil || a.AccessToken == "" {
+			continue
+		}
+		reg := a.Region()
+		if triedRegions[reg] {
+			continue
+		}
+		triedRegions[reg] = true
+
+		infos, err := h.cfg.Upstream.FetchModels(a)
+		if err != nil || len(infos) == 0 {
+			h.cfg.Pool.NoteError(a.UID)
+			continue
+		}
+		for _, mi := range infos {
+			if !seenModel[mi.ID] {
+				seenModel[mi.ID] = true
+				allInfos = append(allInfos, mi)
+			}
+		}
 	}
-	infos, err := h.cfg.Upstream.FetchModels(acct)
-	if err != nil || len(infos) == 0 {
-		// 拉取失败惩罚该账号，避免下次 Pick 又选中同一个反复失败；lastFail 保持全局负缓存。
-		h.cfg.Pool.NoteError(acct.UID)
+
+	if len(allInfos) == 0 {
 		dynamicModelsCache.Lock()
 		dynamicModelsCache.lastFail = time.Now()
 		dynamicModelsCache.Unlock()
 		return nil
 	}
+
 	dynamicModelsCache.Lock()
-	dynamicModelsCache.ids = infos
+	dynamicModelsCache.ids = allInfos
 	dynamicModelsCache.fetched = time.Now()
 	dynamicModelsCache.lastFail = time.Time{} // 成功则清空负缓存
 	dynamicModelsCache.Unlock()
-	return infos
+	return allInfos
 }
 
 func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -347,6 +383,18 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			// 模型感知选号：请求携带 model 时启用 6004 模型级冷却豁免
 			// （PickExcludingForModel 内部当 model 为空时即退化为 PickExcluding）。
 			acct = h.cfg.Pool.PickExcludingForModel(tried, peek.Model)
+		}
+		// 跨区域选号优化：如果指定了具有明确区域特征的模型，优先选择匹配该区域的健康账号
+		if acct != nil {
+			if isGlobalModel(peek.Model) && acct.Region() != "global" {
+				if gAcct := h.findAvailableAccountByRegion(tried, peek.Model, "global"); gAcct != nil {
+					acct = gAcct
+				}
+			} else if isCNModel(peek.Model) && acct.Region() != "cn" {
+				if cnAcct := h.findAvailableAccountByRegion(tried, peek.Model, "cn"); cnAcct != nil {
+					acct = cnAcct
+				}
+			}
 		}
 		if acct == nil {
 			st.status = http.StatusServiceUnavailable
@@ -544,3 +592,37 @@ func writeOpenAIError(w http.ResponseWriter, status int, code, msg string) {
 		},
 	})
 }
+
+func isGlobalModel(model string) bool {
+	m := strings.ToLower(model)
+	return strings.HasPrefix(m, "claude") ||
+		strings.HasPrefix(m, "gpt") ||
+		strings.HasPrefix(m, "o1") ||
+		strings.HasPrefix(m, "o3") ||
+		strings.HasPrefix(m, "deepseek-r1") ||
+		strings.HasPrefix(m, "deepseek-v3")
+}
+
+func isCNModel(model string) bool {
+	m := strings.ToLower(model)
+	return strings.HasPrefix(m, "hy") ||
+		strings.HasPrefix(m, "glm") ||
+		strings.HasPrefix(m, "kimi") ||
+		strings.HasPrefix(m, "minimax")
+}
+
+func (h *Handler) findAvailableAccountByRegion(tried map[string]bool, model, targetRegion string) *auth.Auth {
+	for _, st := range h.cfg.Pool.List() {
+		if st.Disabled || tried[st.UID] {
+			continue
+		}
+		cand := h.cfg.Pool.AuthByUID(st.UID)
+		if cand != nil && cand.Region() == targetRegion {
+			if picked := h.cfg.Pool.PickByUIDForModel(st.UID, model); picked != nil {
+				return picked
+			}
+		}
+	}
+	return nil
+}
+

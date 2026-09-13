@@ -512,8 +512,16 @@ func (c *Client) FetchModels(a *auth.Auth) ([]ModelInfo, error) {
 			break
 		}
 	}
+	// 容错：若未定义 "cli" 代理分组（例如国际版或其他客户端形态），自动回退使用全部未禁用的模型
 	if len(cliIDs) == 0 {
-		return nil, fmt.Errorf("no cli agent models found")
+		for _, m := range env.Data.Models {
+			if !m.Disabled {
+				cliIDs = append(cliIDs, m.ID)
+			}
+		}
+	}
+	if len(cliIDs) == 0 {
+		return nil, fmt.Errorf("no usable models found in upstream response")
 	}
 	dynMap := make(map[string]struct {
 		ID              string
