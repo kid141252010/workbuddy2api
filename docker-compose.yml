@@ -5,6 +5,10 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
+      # 出站代理（可选；支持 http/https/socks5，如需国内端点直连可配置 NO_PROXY 或在 config.json 中启用 proxy_global_only）
+      # - HTTP_PROXY=http://172.17.0.1:7890
+      # - HTTPS_PROXY=http://172.17.0.1:7890
+      # - NO_PROXY=copilot.tencent.com,codebuddy.cn
     ports:
       - "7863:7863"
     volumes:

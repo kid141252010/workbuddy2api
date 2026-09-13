@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,6 +99,7 @@ type loginState struct {
 	Region       string `json:"region"`
 	UpstreamBase string `json:"upstream_base"`
 	Origin       string `json:"origin"`
+	Proxy        string `json:"proxy,omitempty"`
 }
 
 func parseRegion(args []string) string {
@@ -120,17 +122,50 @@ func parseRegion(args []string) string {
 	return "cn"
 }
 
+func parseProxy(args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if (arg == "--proxy" || arg == "-p") && i+1 < len(args) {
+			return args[i+1]
+		}
+		if strings.HasPrefix(arg, "--proxy=") {
+			return strings.TrimPrefix(arg, "--proxy=")
+		}
+	}
+	if v := os.Getenv("WB2A_PROXY"); v != "" {
+		return v
+	}
+	return ""
+}
+
+func makeHTTPClient(proxyURL string, jar http.CookieJar) *http.Client {
+	tr := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+	}
+	if proxyURL != "" {
+		trimmed := strings.TrimSpace(proxyURL)
+		if !strings.Contains(trimmed, "://") {
+			trimmed = "http://" + trimmed
+		}
+		if u, err := url.Parse(trimmed); err == nil {
+			tr.Proxy = http.ProxyURL(u)
+		}
+	}
+	return &http.Client{Timeout: 30 * time.Second, Jar: jar, Transport: tr}
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		fatal("usage: login <url|poll> [--global|-g]")
+		fatal("usage: login <url|poll> [--global|-g] [--proxy <url>]")
 	}
 	// 每个流程独立 cookie jar（多账号登录互不串会话）
 	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Timeout: 30 * time.Second, Jar: jar}
 
 	switch os.Args[1] {
 	case "url":
 		region := parseRegion(os.Args[2:])
+		proxyURL := parseProxy(os.Args[2:])
+		client := makeHTTPClient(proxyURL, jar)
 		upstreamBase := upstreamBaseCN
 		origin := originRefererCN
 		if region == "global" {
@@ -155,6 +190,7 @@ func main() {
 			Region:       region,
 			UpstreamBase: upstreamBase,
 			Origin:       origin,
+			Proxy:        proxyURL,
 		})
 		if err := os.WriteFile(stateFile, raw, 0o600); err != nil {
 			fatal("write state: %v", err)
@@ -175,6 +211,7 @@ func main() {
 			ls.Origin = originRefererCN
 			ls.Region = "cn"
 		}
+		client := makeHTTPClient(ls.Proxy, jar)
 		endpointAuthToken := ls.UpstreamBase + "/v2/plugin/auth/token?state="
 		endpointLoginAcct := ls.UpstreamBase + "/v2/plugin/login/account?state="
 

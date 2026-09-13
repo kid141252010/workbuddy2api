@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -277,9 +278,10 @@ type Client struct {
 	BillingBaseGlob string
 }
 
-// New 生产默认值。配置连接池减少 TLS 握手。
+// New 生产默认值。配置连接池减少 TLS 握手，默认继承环境变量代理（HTTP_PROXY/HTTPS_PROXY/NO_PROXY）。
 func New() *Client {
 	tr := &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
@@ -295,6 +297,62 @@ func New() *Client {
 		ChatBaseGlobal:       "https://www.workbuddy.ai",
 		BillingBaseGlob:      "https://www.workbuddy.ai",
 	}
+}
+
+// SetProxy 设置上游出站代理。
+// proxyURL 支持 http://, https://, socks5://, socks5h://。为空时回退至系统环境变量 (http.ProxyFromEnvironment)。
+// globalOnly 为 true 时，仅对国际版端点（包含 workbuddy.ai 域名）走代理，国内端点直连。
+func (c *Client) SetProxy(proxyURL string, globalOnly bool) error {
+	var proxyFunc func(*http.Request) (*url.URL, error)
+	if proxyURL != "" {
+		trimmed := strings.TrimSpace(proxyURL)
+		if !strings.Contains(trimmed, "://") {
+			trimmed = "http://" + trimmed
+		}
+		parsed, err := url.Parse(trimmed)
+		if err != nil {
+			return fmt.Errorf("invalid proxy url %q: %w", proxyURL, err)
+		}
+		if globalOnly {
+			proxyFunc = func(req *http.Request) (*url.URL, error) {
+				host := strings.ToLower(req.URL.Hostname())
+				if strings.Contains(host, "workbuddy.ai") {
+					return parsed, nil
+				}
+				return nil, nil
+			}
+		} else {
+			proxyFunc = http.ProxyURL(parsed)
+		}
+	} else {
+		if globalOnly {
+			envFunc := http.ProxyFromEnvironment
+			proxyFunc = func(req *http.Request) (*url.URL, error) {
+				host := strings.ToLower(req.URL.Hostname())
+				if strings.Contains(host, "workbuddy.ai") {
+					return envFunc(req)
+				}
+				return nil, nil
+			}
+		} else {
+			proxyFunc = http.ProxyFromEnvironment
+		}
+	}
+
+	setTrProxy := func(client *http.Client) {
+		if client == nil {
+			return
+		}
+		if tr, ok := client.Transport.(*http.Transport); ok && tr != nil {
+			tr.Proxy = proxyFunc
+		}
+	}
+
+	setTrProxy(c.HTTP)
+	if c.ChatHTTP != c.HTTP {
+		setTrProxy(c.ChatHTTP)
+	}
+	return nil
 }
 
 // chatHTTP 返回聊天专用 client；未设置（如测试只注入 HTTP）时回落 HTTP。

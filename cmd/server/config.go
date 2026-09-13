@@ -25,6 +25,8 @@ type Config struct {
 	Models []server.ModelItem `json:"models"`
 	// ModelMapping 模型重映射（可选；客户端请求模型名 -> 上游实际模型名）。
 	ModelMapping map[string]string `json:"model_mapping"`
+	// Proxy 可选出站代理（支持 http://, https://, socks5://），亦可在 upstream.proxy 配置。
+	Proxy string `json:"proxy"`
 
 	Server struct {
 		// MaxBodyMB 聊天请求体大小上限（单位 MB，默认 8）。
@@ -64,6 +66,10 @@ type Config struct {
 		BillingBaseCN     string `json:"billing_base_cn"`
 		ChatBaseGlobal    string `json:"chat_base_global"`
 		BillingBaseGlobal string `json:"billing_base_global"`
+		// Proxy 可选出站代理（支持 http://, https://, socks5://）。
+		Proxy string `json:"proxy"`
+		// ProxyGlobalOnly 仅对国际版请求（workbuddy.ai）走代理，国内端点直连（默认 false）。
+		ProxyGlobalOnly bool `json:"proxy_global_only"`
 	} `json:"upstream"`
 
 	Features struct {
@@ -217,10 +223,21 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("WB2A_PROMPT_FILE"); v != "" {
 		c.Prompt.File = v
 	}
+	if v := os.Getenv("WB2A_PROXY"); v != "" {
+		c.Upstream.Proxy = v
+	}
+	if v := os.Getenv("WB2A_PROXY_GLOBAL_ONLY"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Upstream.ProxyGlobalOnly = b
+		}
+	}
 }
 
 func (c *Config) normalize() error {
 	var err error
+	if c.Upstream.Proxy == "" && c.Proxy != "" {
+		c.Upstream.Proxy = c.Proxy
+	}
 	// max_body_mb 非法（0/负数）直接报错：0 若被静默当成默认 8MB，用户以为"不限"，
 	// 大请求又被静默 413——不如 fail fast 提示显式配大上限。
 	if c.Server.MaxBodyMB <= 0 {

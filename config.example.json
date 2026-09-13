@@ -38,7 +38,9 @@
     "timeout_seconds": 120,
     "header_timeout_seconds": 120,
     "idle_timeout_seconds": 300,
-    "user_agent": ""
+    "user_agent": "",
+    "proxy": "",
+    "proxy_global_only": false
   },
   "features": {
     "sanitize_blacklist_fingerprints": true

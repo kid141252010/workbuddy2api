@@ -110,6 +110,20 @@ func main() {
 		up.BillingBaseGlob = cfg.Upstream.BillingBaseGlobal
 	}
 
+	if cfg.Upstream.Proxy != "" || cfg.Upstream.ProxyGlobalOnly {
+		if err := up.SetProxy(cfg.Upstream.Proxy, cfg.Upstream.ProxyGlobalOnly); err != nil {
+			log.Fatalf("配置上游代理失败: %v", err)
+		}
+		if cfg.Upstream.Proxy != "" {
+			log.Printf("上游代理已启用: %s (仅国际版: %v)", cfg.Upstream.Proxy, cfg.Upstream.ProxyGlobalOnly)
+		} else if cfg.Upstream.ProxyGlobalOnly {
+			log.Printf("系统环境变量代理已启用 (仅国际版生效)")
+		}
+	} else if os.Getenv("HTTP_PROXY") != "" || os.Getenv("HTTPS_PROXY") != "" || os.Getenv("ALL_PROXY") != "" {
+		log.Printf("使用系统环境变量代理: HTTP_PROXY=%q HTTPS_PROXY=%q ALL_PROXY=%q",
+			os.Getenv("HTTP_PROXY"), os.Getenv("HTTPS_PROXY"), os.Getenv("ALL_PROXY"))
+	}
+
 	sch := scheduler.New(scheduler.Config{
 		Pool:                p,
 		Upstream:            up,

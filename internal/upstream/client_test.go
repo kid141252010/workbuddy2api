@@ -521,3 +521,51 @@ func TestChatHTTPNilFallsBackToHTTP(t *testing.T) {
 		t.Error("chatHTTP() should fall back to HTTP when ChatHTTP is nil")
 	}
 }
+
+func TestSetProxy(t *testing.T) {
+	c := New()
+	tr, ok := c.HTTP.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatal("expected *http.Transport")
+	}
+
+	// 1. 全局 HTTP 代理
+	if err := c.SetProxy("127.0.0.1:7890", false); err != nil {
+		t.Fatalf("SetProxy failed: %v", err)
+	}
+	req, _ := http.NewRequest("GET", "https://copilot.tencent.com", nil)
+	proxyURL, err := tr.Proxy(req)
+	if err != nil || proxyURL == nil || proxyURL.String() != "http://127.0.0.1:7890" {
+		t.Errorf("expected http://127.0.0.1:7890, got %v (err=%v)", proxyURL, err)
+	}
+
+	// 2. SOCKS5 代理
+	if err := c.SetProxy("socks5://10.0.0.1:1080", false); err != nil {
+		t.Fatalf("SetProxy socks5 failed: %v", err)
+	}
+	proxyURL, err = tr.Proxy(req)
+	if err != nil || proxyURL == nil || proxyURL.String() != "socks5://10.0.0.1:1080" {
+		t.Errorf("expected socks5://10.0.0.1:1080, got %v (err=%v)", proxyURL, err)
+	}
+
+	// 3. 仅国际版走代理 (globalOnly = true)
+	if err := c.SetProxy("http://127.0.0.1:7890", true); err != nil {
+		t.Fatalf("SetProxy globalOnly failed: %v", err)
+	}
+	reqCN, _ := http.NewRequest("GET", "https://copilot.tencent.com/v2/chat", nil)
+	pCN, err := tr.Proxy(reqCN)
+	if err != nil || pCN != nil {
+		t.Errorf("CN request should not use proxy, got %v", pCN)
+	}
+	reqGlobal, _ := http.NewRequest("GET", "https://www.workbuddy.ai/v2/chat", nil)
+	pGlobal, err := tr.Proxy(reqGlobal)
+	if err != nil || pGlobal == nil || pGlobal.String() != "http://127.0.0.1:7890" {
+		t.Errorf("Global request should use proxy, got %v", pGlobal)
+	}
+
+	// 4. 非法代理 URL
+	if err := c.SetProxy("://invalid-url", false); err == nil {
+		t.Error("expected error on invalid url")
+	}
+}
+

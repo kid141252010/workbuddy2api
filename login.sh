@@ -17,13 +17,33 @@ CONTAINER="workbuddy2api"
 
 REGION="cn"
 LOGIN_EXTRA_ARGS=()
-for arg in "$@"; do
-    case "$arg" in
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --global|-g|global)
             REGION="global"
             LOGIN_EXTRA_ARGS+=("--global")
+            shift
+            ;;
+        --proxy|-p)
+            LOGIN_EXTRA_ARGS+=("--proxy" "$2")
+            export HTTP_PROXY="$2"
+            export HTTPS_PROXY="$2"
+            export http_proxy="$2"
+            export https_proxy="$2"
+            shift 2
+            ;;
+        --proxy=*)
+            PROXY_VAL="${1#*=}"
+            LOGIN_EXTRA_ARGS+=("--proxy" "$PROXY_VAL")
+            export HTTP_PROXY="$PROXY_VAL"
+            export HTTPS_PROXY="$PROXY_VAL"
+            export http_proxy="$PROXY_VAL"
+            export https_proxy="$PROXY_VAL"
+            shift
             ;;
         *)
+            LOGIN_EXTRA_ARGS+=("$1")
+            shift
             ;;
     esac
 done

@@ -674,3 +674,40 @@ func TestUpstreamUserAgentConfig(t *testing.T) {
 		t.Errorf("env user_agent=%q want EnvAgent/9", c3.Upstream.UserAgent)
 	}
 }
+
+func TestProxyConfig(t *testing.T) {
+	// 1. 顶层 proxy 拷贝至 upstream.proxy
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "c.json")
+	os.WriteFile(fp, []byte(`{"proxy":"http://127.0.0.1:7890"}`), 0o600)
+	c, err := Load(fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Upstream.Proxy != "http://127.0.0.1:7890" {
+		t.Errorf("expected Upstream.Proxy to be http://127.0.0.1:7890, got %q", c.Upstream.Proxy)
+	}
+
+	// 2. upstream.proxy 与 proxy_global_only
+	fp2 := filepath.Join(dir, "c2.json")
+	os.WriteFile(fp2, []byte(`{"upstream":{"proxy":"socks5://127.0.0.1:1080","proxy_global_only":true}}`), 0o600)
+	c2, err := Load(fp2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c2.Upstream.Proxy != "socks5://127.0.0.1:1080" || !c2.Upstream.ProxyGlobalOnly {
+		t.Errorf("unexpected upstream proxy config: %+v", c2.Upstream)
+	}
+
+	// 3. 环境变量覆盖
+	t.Setenv("WB2A_PROXY", "http://env-proxy:8080")
+	t.Setenv("WB2A_PROXY_GLOBAL_ONLY", "true")
+	c3, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c3.Upstream.Proxy != "http://env-proxy:8080" || !c3.Upstream.ProxyGlobalOnly {
+		t.Errorf("env proxy mismatch: %+v", c3.Upstream)
+	}
+}
+
