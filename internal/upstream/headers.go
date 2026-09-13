@@ -3,16 +3,28 @@
 package upstream
 
 import (
+	"crypto/rand"
+	"fmt"
 	"net/http"
 
 	"workbuddy2api/internal/auth"
 )
 
 const (
-	clientUA            = "CLI/2.63.2 CodeBuddy/2.63.2"
+	cliVersion          = "2.149.0"
+	clientUA            = "CLI/" + cliVersion + " CodeBuddy/" + cliVersion
 	originRefererCN     = "https://www.codebuddy.cn"
 	originRefererGlobal = "https://www.workbuddy.ai"
 )
+
+// newUUID 生成标准 RFC 4122 v4 UUID（用于上游链路追踪头）。
+func newUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
 
 func originRefererFor(a *auth.Auth) string {
 	if a != nil && a.Region() == "global" {
@@ -67,6 +79,32 @@ func (c *Client) ChatHeaders(req *http.Request, a *auth.Auth) {
 		req.Header.Set("X-No-Department-Info", "1")
 	}
 	req.Header.Set("X-Product", "SaaS")
+
+	// CodeBuddy CLI 2.149.0 仿真标识
+	req.Header.Set("X-IDE-Type", "CLI")
+	req.Header.Set("X-IDE-Name", "CLI")
+	req.Header.Set("X-IDE-Version", cliVersion)
+
+	// Stainless SDK 运行时指纹（官方客户端核心过检特征）
+	req.Header.Set("x-stainless-arch", "x64")
+	req.Header.Set("x-stainless-lang", "js")
+	req.Header.Set("x-stainless-os", "Linux")
+	req.Header.Set("x-stainless-package-version", "6.25.0")
+	req.Header.Set("x-stainless-retry-count", "0")
+	req.Header.Set("x-stainless-runtime", "node")
+	req.Header.Set("x-stainless-runtime-version", "v24.21.0")
+	req.Header.Set("X-Agent-Intent", "craft")
+	req.Header.Set("X-Agent-Purpose", "conversation")
+	req.Header.Set("X-Agent-Type", "main")
+	req.Header.Set("X-Private-Data", "false")
+	req.Header.Set("X-CodeBuddy-Request", "1")
+
+	// 链路与会话追踪头
+	convID := newUUID()
+	req.Header.Set("X-Conversation-ID", convID)
+	req.Header.Set("X-Conversation-Request-ID", convID)
+	req.Header.Set("X-Conversation-Message-ID", newUUID())
+	req.Header.Set("X-Request-Trace-Id", newUUID())
 }
 
 // BillingHeaders billing 接口请求头。

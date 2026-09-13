@@ -31,7 +31,8 @@ const (
 	originRefererCN     = "https://www.codebuddy.cn"
 	upstreamBaseGlobal  = "https://www.workbuddy.ai"
 	originRefererGlobal = "https://www.workbuddy.ai"
-	clientUA            = "CLI/2.63.2 CodeBuddy/2.63.2"
+	cliVersion          = "2.149.0"
+	clientUA            = "CLI/" + cliVersion + " CodeBuddy/" + cliVersion
 )
 
 var stateFile = filepath.Join(os.TempDir(), "wb2api-login-state.json")

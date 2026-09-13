@@ -149,4 +149,65 @@ func TestFetchModelsUsesConfiguredUA(t *testing.T) {
 	}
 }
 
+// TestChatHeadersCodeBuddyCLISimulation 验证 ChatHeaders 完整包含官方 CodeBuddy CLI 2.149.0 仿真头与追踪头。
+func TestChatHeadersCodeBuddyCLISimulation(t *testing.T) {
+	c := &Client{}
+	req, _ := http.NewRequest(http.MethodPost, "https://chat.example/v2/chat/completions", nil)
+	a := &auth.Auth{
+		AccessToken: "test-token",
+		UID:         "uid-123",
+		Domain:      "www.workbuddy.ai",
+	}
+	c.ChatHeaders(req, a)
+
+	// 1. 基本身份与 UA
+	if got := req.Header.Get("User-Agent"); got != "CLI/2.149.0 CodeBuddy/2.149.0" {
+		t.Errorf("UA = %q want CLI/2.149.0 CodeBuddy/2.149.0", got)
+	}
+	if got := req.Header.Get("X-IDE-Type"); got != "CLI" {
+		t.Errorf("X-IDE-Type = %q want CLI", got)
+	}
+	if got := req.Header.Get("X-IDE-Version"); got != "2.149.0" {
+		t.Errorf("X-IDE-Version = %q want 2.149.0", got)
+	}
+
+	// 2. Stainless SDK 指纹
+	for k, want := range map[string]string{
+		"x-stainless-arch":            "x64",
+		"x-stainless-lang":            "js",
+		"x-stainless-os":              "Linux",
+		"x-stainless-package-version": "6.25.0",
+		"x-stainless-runtime":         "node",
+		"x-stainless-runtime-version": "v24.21.0",
+		"X-Agent-Intent":              "craft",
+		"X-Agent-Purpose":             "conversation",
+		"X-Agent-Type":                "main",
+		"X-Private-Data":              "false",
+		"X-CodeBuddy-Request":         "1",
+	} {
+		if got := req.Header.Get(k); got != want {
+			t.Errorf("header %s = %q want %q", k, got, want)
+		}
+	}
+
+	// 3. 会话与链路追踪 UUID
+	for _, k := range []string{
+		"X-Conversation-ID",
+		"X-Conversation-Request-ID",
+		"X-Conversation-Message-ID",
+		"X-Request-Trace-Id",
+	} {
+		if got := req.Header.Get(k); len(got) != 36 || strings.Count(got, "-") != 4 {
+			t.Errorf("header %s = %q is not a valid UUID", k, got)
+		}
+	}
+
+	// 4. 会话与请求 ID 保持一致性关联
+	convID := req.Header.Get("X-Conversation-ID")
+	reqID := req.Header.Get("X-Conversation-Request-ID")
+	if convID != reqID {
+		t.Errorf("Conversation-ID (%s) != Conversation-Request-ID (%s)", convID, reqID)
+	}
+}
+
 var _ = io.Discard
