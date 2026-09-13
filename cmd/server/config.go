@@ -160,6 +160,10 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("read config: %w", err)
 		}
 		if err := json.Unmarshal(raw, c); err != nil {
+			if synErr, ok := err.(*json.SyntaxError); ok {
+				line, col := lineCol(raw, synErr.Offset)
+				return nil, fmt.Errorf("parse config at line %d, col %d: %w", line, col, err)
+			}
 			return nil, fmt.Errorf("parse config: %w", err)
 		}
 	}
@@ -319,4 +323,19 @@ func (c *Config) normalizePrompt() error {
 	}
 	return nil
 }
+
+func lineCol(data []byte, offset int64) (line int, col int) {
+	line = 1
+	col = 1
+	for i := int64(0); i < offset && i < int64(len(data)); i++ {
+		if data[i] == '\n' {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+	}
+	return
+}
+
 

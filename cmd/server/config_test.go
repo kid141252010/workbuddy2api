@@ -711,3 +711,20 @@ func TestProxyConfig(t *testing.T) {
 	}
 }
 
+func TestJSONSyntaxErrorReportsLineAndCol(t *testing.T) {
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "bad.json")
+	// 模拟数组末尾误写大括号 }
+	badJSON := "{\n  \"models\": [\n    \"gpt-4o\"\n  }\n}"
+	os.WriteFile(fp, []byte(badJSON), 0o600)
+
+	_, err := Load(fp)
+	if err == nil {
+		t.Fatal("expected syntax error")
+	}
+	if !strings.Contains(err.Error(), "line 4") {
+		t.Errorf("expected error message to mention line 4, got %v", err)
+	}
+}
+
+
